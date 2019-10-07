@@ -57,38 +57,39 @@ class VelodyneVLP16(Lidar):
         super(VelodyneVLP16, self).__init__()
 
     def process_data_frame(self, data, frame_idx):
-        # iteratie through each block
-        # each block consists of 100 Bytes
-        idx = 0
 
+        # veldyne has 12 blocks each 100 bytes data
         # data-legth = 1206 bytes
         blocks = data[0:1200].reshape(12, 100)
         timestamp = data[1200:1204]
         factory = data[1204:]
 
-        for idx, blk in blocks:
-            self.read_firing_data(blk, idx)
+        # iteratie through each block
+        for blk in blocks:
+            self.read_firing_data(blk)
 
     def process_position_frame(self, data, frame_idx):
         raise NotImplementedError("Subclasses should implement this!")
 
-    def read_firing_data(self, data, idx):
+    def read_firing_data(self, data):
+        idx = 0
         block_id = read_uint16(data, idx)
-
         # 0xeeff is upper block
         assert block_id == 0xeeff
+
         idx += 2
-        azimuth = read_uint16(data, idx) / 100
+        azimuth = read_uint16(data, idx) / 100.
         idx += 2
 
-        for l in range(32):
+        # read two firing sequences
+        for i in range(32):
             dist = read_uint16(data, idx)
-        idx += 2
-        intensity = read_uint8(data, idx)
-        idx += 1
-        # upper laser block ids range from 0 to 31, lower from 32 to 63
-        laser_idx = l + (32 if block_id == 0xddff else 0)
-        self.calc_point(laser_idx, azimuth, dist, intensity)
+            idx += 2
+            intensity = read_uint8(data, idx)
+            idx += 1
+            # upper laser block ids range from 0 to 31, lower from 32 to 63
+            laser_idx = i + (32 if block_id == 0xddff else 0)
+            self.calc_point(laser_idx, azimuth, dist, intensity)
 
     def calc_point(self, laser_idx, azimuth, dist, intensity):
         # calc point 3d-geom.
