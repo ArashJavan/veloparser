@@ -72,14 +72,17 @@ class VelodyneVLP16(Lidar):
         raise NotImplementedError("Subclasses should implement this!")
 
     def read_firing_data(self, data):
+        block_id = data[0] + data[1]*256
+        azimuth =  (data[2] + data[3]*256) / 100
+
         idx = 0
         block_id = read_uint16(data, idx)
         # 0xeeff is upper block
         assert block_id == 0xeeff
+        data = data[4:].reshape(32, 3)
 
         idx += 2
         azimuth = read_uint16(data, idx) / 100.
-        idx += 2
 
         # read two firing sequences
         for i in range(32):
@@ -110,8 +113,8 @@ def main(args):
         for idx, (ts, buf) in enumerate(reader):
             eth = dpkt.ethernet.Ethernet(buf)
             data = eth.data.data.data
-            data = np.frombuffer(data, dtype=np.uint8).astype(np.uint32)
 
+            data = np.frombuffer(data, dtype=np.uint8).astype(np.uint32)
             if eth.data.data.sport == GPS_PORT:
                 lidar.process_position_frame(data, idx)
             elif  eth.data.data.sport == DATA_PORT:
@@ -131,6 +134,7 @@ def main(args):
                     idx += 2
                     intensity = read_uint8(data, idx)
                     idx += 1
+                    print("dist: {}, int: {}".format(dist, intensity))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
