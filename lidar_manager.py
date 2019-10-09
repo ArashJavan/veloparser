@@ -4,7 +4,9 @@ import dpkt
 import datetime
 import numpy as np
 
-from gps import GprmcMessage
+from plyfile import PlyData, PlyElement
+
+from gps import GprmcMessage, utc_to_weekseconds
 import lidar
 
 
@@ -40,6 +42,8 @@ class VelodyneManager():
         self.last_azimuth = None
         self.date = None
 
+        self.gps_fp = None
+
         if "velodynevlp16" == type.lower():
             self.lidar = lidar.VelodyneVLP16()
 
@@ -61,10 +65,6 @@ class VelodyneManager():
         if not self.create_folders():
             return
 
-        # create frame text writer
-        if self.params['text']:
-            self.frame_writer = PointCloudTextWriter(self.txt_path, index=self.frame_nr)
-
         # itearte through each data packet and timestamps
         for idx, (ts, buf) in enumerate(self.lidar_reader):
 
@@ -74,7 +74,7 @@ class VelodyneManager():
                 break
 
             if self.date is None:
-                self.date = datetime.datetime.utcfromtimestamp(ts).date()
+                self.datetime = datetime.datetime.utcfromtimestamp(ts)
 
             eth = dpkt.ethernet.Ethernet(buf)
             data = eth.data.data.data
@@ -87,6 +87,9 @@ class VelodyneManager():
             # Handle Data-Frame (Point clouds)
             if eth.data.data.sport == self.params['data-port']:
                 self.process_data_frame(data, ts, idx)
+
+        if self.gps_fp is not None:
+            self.gps_fp.close()
 
     def process_data_frame(self, data, timestamp, index):
         cur_X, cur_Y, cur_Z, cur_intensities, cur_latitudes, cur_timestamps, cur_distances = self.lidar.process_data_frame(data, index)
@@ -122,8 +125,6 @@ class VelodyneManager():
 
         # handle rollover (full 360° frame)
         if idx_rollovr is not None:
-            time = self.time_from_lidar(self.timestamps[0])
-
             if idx_rollovr > 0:
                 self.pos_X = np.hstack((self.pos_X, cur_X[0:idx_rollovr+1]))
                 self.pos_Y = np.hstack((self.pos_Y, cur_Y[0:idx_rollovr+1]))
@@ -135,12 +136,22 @@ class VelodyneManager():
                 self.indicies = np.hstack((self.indicies, cur_indicies[0:idx_rollovr+1]))
                 self.longitudes = np.hstack((self.longitudes, cur_longitudes[0:idx_rollovr+1]))
 
-            if self.params['text']:
+            min, sec, micro = self.time_from_lidar(self.timestamps[0])
+            self.datetime = self.datetime.replace(minute=min, second=sec, microsecond=int(micro))
+            gpsweek, gpsdays, gpsseconds, gpsmicrosec = utc_to_weekseconds(self.datetime, 0)
+            print("self-ts: {}, dattime: {}, week: {}, seconds: {}, micro: {:06}".format(self.timestamps[0], self.datetime, gpsweek, gpsseconds, gpsmicrosec))
 
-                fpath = "{}/{}_data_frame.txt".format(self.txt_path, index)
-                write_pcl_txt(self.txt_path, date, self.timestamps[0], self.frame_nr, self.timestamps,
-                              self.pos_X, self.pos_Y, self.pos_Z, self.indicies,
+            if self.params['text']:
+                fpath = "{}/{}_frame_{}.{:06d}.txt".format(self.txt_path, self.frame_nr, gpsseconds, gpsmicrosec)
+                write_pcl_txt(fpath, self.timestamps, self.pos_X, self.pos_Y, self.pos_Z, self.indicies,
                               self.intensities, self.latitudes, self.longitudes, self.distances)
+
+            if self.params['ply']:
+                fpath = "{}/{}_frame_{}.{:06d}.ply".format(self.txt_path, self.frame_nr, gpsseconds, gpsmicrosec)
+                write_ply(fpath, self.timestamps, self.pos_X, self.pos_Y, self.pos_Z, self.indicies,
+                          self.intensities, self.latitudes, self.longitudes, self.distances)
+
+            # reset states
             if idx_rollovr > 0:
                 self.pos_X = cur_X[idx_rollovr+1:]
                 self.pos_Y = cur_Y[idx_rollovr+1:]
@@ -183,9 +194,21 @@ class VelodyneManager():
     def process_gps_frame(self, data, timestamp, index):
         gps_msg = self.lidar.process_position_frame(data, index)
 
-        if self.params['text']:
-            # write point cloud as a text-file
-            write_gps_txt(self.txt_path, timestamp, index, gps_msg)
+        # open gps file to write in
+        if self.gps_fp is None:
+            try:
+                gps_path = Path("{}/{}.txt".format(self.out_path, "data_gps"))
+                self.gps_fp = open(gps_path, 'w')
+                # write point cloud as a text-file
+                header = "UTC-Time, Week, Seconds [sow], Status, Latitude [Deg], Longitudes [Deg], Velocity [m/s]\n"
+                self.gps_fp.write(header)
+            except Exception as ex:
+                print(ex)
+
+        txt = "{}, {}, {}, {}, {} {}, {} {}, {}\n".format(gps_msg.datetime, gps_msg.weeks, gps_msg.seconds,
+                                                          gps_msg.status, gps_msg.lat, gps_msg.lat_ori,
+                                                          gps_msg.long, gps_msg.lat_ori, gps_msg.velocity)
+        self.gps_fp.write(txt)
 
     def is_roll_over(self):
 
@@ -204,7 +227,12 @@ class VelodyneManager():
             return None
 
     def time_from_lidar(self, timestamp):
-        pass
+        micro =  timestamp % (1000*1000)
+        min_float = timestamp / (1000*1000*60)
+        min = int(min_float)
+        sec = int((min_float % min) * 60)
+        min = int(min)
+        return min, sec, micro
 
     def create_folders(self):
         self.out_path = Path("{}/{}".format(self.out_root, self.lidar_type.lower()))
@@ -217,7 +245,7 @@ class VelodyneManager():
             return False
 
         # create point cloud dirs
-        self.pcl_path = Path("{}/{}".format(self.out_path, "frames_pcl"))
+        self.pcl_path = Path("{}/{}".format(self.out_path, "data_pcl"))
         try:
             os.makedirs(self.pcl_path.absolute())
         except Exception as ex:
@@ -226,7 +254,7 @@ class VelodyneManager():
 
         # if text-files are desired, create text-file dir
         if self.params['text']:
-            self.txt_path = Path("{}/{}".format(self.out_path, "frames_text"))
+            self.txt_path = Path("{}/{}".format(self.out_path, "data_ascii"))
             try:
                 os.makedirs(self.txt_path.absolute())
             except Exception as ex:
@@ -246,12 +274,10 @@ def write_gps_txt(path, ts_frame, index, gps_msg):
         fp.write(txt)
 
 
-def write_pcl_txt(path, ts_frame, index, timestamps, X, Y, Z,  laser_id, intensities=None, latitudes=None, longitudes=None, distances=None):
+def write_pcl_txt(path, timestamps, X, Y, Z,  laser_id, intensities=None, latitudes=None, longitudes=None, distances=None):
     header = "Time [musec], X [m], Y [m], Z [m], ID, Intensity, Latitude [Deg], Longitudes [Deg], Distance [m]"
-    fpath = "{}/{}_data_frame.txt".format(path,  index)
-
     try:
-        fp = open(fpath, 'w')
+        fp = open(path, 'w')
         np.savetxt(fp, [], delimiter=', ', header=header)
     except Exception as ex:
         print(str(ex))
@@ -272,45 +298,20 @@ def write_pcl_txt(path, ts_frame, index, timestamps, X, Y, Z,  laser_id, intensi
     fp.close()
 
 
-class PointCloudTextWriter():
-    def __init__(self, path, index):
-        self.path = path
-        self.initialised = False
-        self.index = index
+def write_ply(path, timestamps, X, Y, Z,  laser_id, intensities=None, latitudes=None, longitudes=None, distances=None):
 
-    def initialise(self):
-        header = "Time [musec], X [m], Y [m], Z [m], ID, Intensity, Latitude [Deg], Longitudes [Deg], Distance [m]"
-        fpath = "{}/{}_{}.txt".format(self.path, self.index, "data_frame")
+    M = np.vstack((timestamps, X, Y, Z, laser_id))
 
-        try:
-            self.fp = open(self.fpath, 'w')
-            np.savetxt(self.fp, [], delimiter=', ', header=header)
-        except Exception as ex:
-            print(str(ex))
-            return
+    if intensities is not None:
+        M = np.vstack((M, intensities))
+    if latitudes is not None:
+        M = np.vstack((M, latitudes))
+    if longitudes is not None:
+        M = np.vstack((M, longitudes))
+    if distances is not None:
+        M = np.vstack((M, distances))
 
-        self.initialised = True
-
-    def write(self, timestamps, X, Y, Z,  laser_id, intensities=None, latitudes=None, longitudes=None, distances=None):
-
-        if not self.initialised:
-            self.initialise()
-
-        M = np.vstack((timestamps, X, Y, Z, laser_id))
-
-        if intensities is not None:
-            M = np.vstack((M, intensities))
-        if latitudes is not None:
-            M = np.vstack((M, latitudes))
-        if longitudes is not None:
-            M = np.vstack((M, longitudes))
-        if distances is not None:
-            M = np.vstack((M, distances))
-
-        np.savetxt(fp, M.T, fmt=('%d', '%.6f', '%.6f', '%.6f', '%d', '%d', '%.3f', '%.3f', '%.3f'), delimiter=', ')
-
-    def close(self):
-        self.fp.close()
+    print(M)
 
 
 

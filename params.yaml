@@ -1,10 +1,10 @@
-gps: True
 gps-port: 8308
 data-port: 2368
 type: velodyneVLP16
 
+gps: False
 text: True
-pyl: False
+ply: True
 
 from: 0  # first packet to read
 to: -1   # last packet to read
