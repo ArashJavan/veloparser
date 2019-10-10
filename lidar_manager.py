@@ -3,19 +3,10 @@ from pathlib import Path
 import dpkt
 import datetime
 import numpy as np
-
-from plyfile import PlyData, PlyElement
+from tqdm import tqdm
 
 from gps import GprmcMessage, utc_to_weekseconds
 import lidar
-
-
-def create_point_cloud(X, Y, Z):
-    return None
-
-
-def write_point_cloud_to_file(path, index, X, Y, Z, intensities, latitudes, longitudes, timestamps):
-    pass
 
 
 class VelodyneManager():
@@ -47,11 +38,31 @@ class VelodyneManager():
         if "velodynevlp16" == type.lower():
             self.lidar = lidar.VelodyneVLP16()
 
+    def get_pcap_length(self):
+        # open pcap file
+        try:
+            fpcap = open(self.pcap_path, 'rb')
+            lidar_reader = dpkt.pcap.Reader(fpcap)
+        except Exception as ex:
+            print(str(ex))
+            return 0
+
+        counter = 0
+        # itearte through each data packet and timestamps
+        for _, _ in enumerate(lidar_reader):
+            counter += 1
+        fpcap.close()
+        return counter
+
     def run(self):
         """
         Exteractis point clouds from pcap file
         :return:
         """
+
+        pcap_len = self.get_pcap_length()
+        if pcap_len <= 0:
+            return
 
         # open pcap file
         try:
@@ -66,6 +77,7 @@ class VelodyneManager():
             return
 
         # itearte through each data packet and timestamps
+        pbar = tqdm(total=pcap_len)
         for idx, (ts, buf) in enumerate(self.lidar_reader):
 
             if idx < self.params['from']:
@@ -87,6 +99,8 @@ class VelodyneManager():
             # Handle Data-Frame (Point clouds)
             if eth.data.data.sport == self.params['data-port']:
                 self.process_data_frame(data, ts, idx)
+
+            pbar.update(1)
 
         if self.gps_fp is not None:
             self.gps_fp.close()
@@ -139,7 +153,6 @@ class VelodyneManager():
             min, sec, micro = self.time_from_lidar(self.timestamps[0])
             self.datetime = self.datetime.replace(minute=min, second=sec, microsecond=int(micro))
             gpsweek, gpsdays, gpsseconds, gpsmicrosec = utc_to_weekseconds(self.datetime, 0)
-            print("self-ts: {}, dattime: {}, week: {}, seconds: {}, micro: {:06}".format(self.timestamps[0], self.datetime, gpsweek, gpsseconds, gpsmicrosec))
 
             if self.params['text']:
                 fpath = "{}/{}_frame_{}.{:06d}.txt".format(self.txt_path, self.frame_nr, gpsseconds, gpsmicrosec)
@@ -147,9 +160,8 @@ class VelodyneManager():
                               self.intensities, self.latitudes, self.longitudes, self.distances)
 
             if self.params['ply']:
-                fpath = "{}/{}_frame_{}.{:06d}.ply".format(self.txt_path, self.frame_nr, gpsseconds, gpsmicrosec)
-                write_ply(fpath, self.timestamps, self.pos_X, self.pos_Y, self.pos_Z, self.indicies,
-                          self.intensities, self.latitudes, self.longitudes, self.distances)
+                fpath = "{}/{}_frame_{}.{:06d}.pcd".format(self.pcl_path, self.frame_nr, gpsseconds, gpsmicrosec)
+                write_pcd(fpath, self.pos_X, self.pos_Y, self.pos_Z, self.intensities)
 
             # reset states
             if idx_rollovr > 0:
@@ -211,7 +223,10 @@ class VelodyneManager():
         self.gps_fp.write(txt)
 
     def is_roll_over(self):
-
+        """
+        Check if one frame is completed, therefore 360° rotation of the lidar
+        :return:
+        """
         diff_cur = self.cur_azimuth[0:-1] - self.cur_azimuth[1:]
         diff_cur_last = self.cur_azimuth - self.last_azimuth
 
@@ -227,7 +242,13 @@ class VelodyneManager():
             return None
 
     def time_from_lidar(self, timestamp):
-        micro =  timestamp % (1000*1000)
+        """
+        convert the timestamp [top of the hour in microsec] of a firing into
+        minutes, seconds and microseconds
+        :param timestamp:
+        :return:
+        """
+        micro = timestamp % (1000*1000)
         min_float = timestamp / (1000*1000*60)
         min = int(min_float)
         sec = int((min_float % min) * 60)
@@ -263,17 +284,6 @@ class VelodyneManager():
         return True
 
 
-def write_gps_txt(path, ts_frame, index, gps_msg):
-    fpath = "{}/{}_{}_{}.txt".format(path, index, "gps", str(datetime.datetime.utcfromtimestamp(ts_frame)))
-    header = "UTC-Time, Week, Seconds [sow], Status, Latitude [Deg], Longitudes [Deg], Velocity [m/s]\n"
-    txt = "{}, {}, {}, {}, {} {}, {} {}, {}\n".format(gps_msg.datetime, gps_msg.weeks, gps_msg.seconds,
-                                                      gps_msg.status, gps_msg.lat, gps_msg.lat_ori,
-                                                      gps_msg.long, gps_msg.lat_ori, gps_msg.velocity)
-    with open(fpath, 'w') as fp:
-        fp.write(header)
-        fp.write(txt)
-
-
 def write_pcl_txt(path, timestamps, X, Y, Z,  laser_id, intensities=None, latitudes=None, longitudes=None, distances=None):
     header = "Time [musec], X [m], Y [m], Z [m], ID, Intensity, Latitude [Deg], Longitudes [Deg], Distance [m]"
     try:
@@ -298,22 +308,26 @@ def write_pcl_txt(path, timestamps, X, Y, Z,  laser_id, intensities=None, latitu
     fp.close()
 
 
-def write_ply(path, timestamps, X, Y, Z,  laser_id, intensities=None, latitudes=None, longitudes=None, distances=None):
+def write_pcd(path, X, Y, Z,  intensities=None):
+    template = """VERSION {}\nFIELDS {}\nSIZE {}\nTYPE {}\nCOUNT {}\nWIDTH {}\nHEIGHT {}\nVIEWPOINT {}\nPOINTS {}\nDATA {}\n"""
 
-    M = np.vstack((timestamps, X, Y, Z, laser_id))
+    X = X.astype(np.float32).reshape(1, -1)
+    Y = Y.astype(np.float32).reshape(1, -1)
+    Z = Z.astype(np.float32).reshape(1, -1)
 
     if intensities is not None:
-        M = np.vstack((M, intensities))
-    if latitudes is not None:
-        M = np.vstack((M, latitudes))
-    if longitudes is not None:
-        M = np.vstack((M, longitudes))
-    if distances is not None:
-        M = np.vstack((M, distances))
+        I = intensities.astype(np.float32).reshape(1, -1)
+        M = np.hstack((X.T, Y.T, Z.T, I.T))
+        pc_data = M.view(np.dtype([('x', np.float32), ('y', np.float32), ('z', np.float32), ('i', np.float32)]))
+        tmpl = template.format("0.7", "x y z intensity", "4 4 4 4", "F F F F", "1 1 1 1", pc_data.size, "1",
+                               "0 0 0 1 0 0 0", pc_data.size, "binary")
+    else:
+        M = np.hstack((X.T, Y.T, Z.T))
+        pc_data = M.view(np.dtype([('x', np.float32), ('y', np.float32), ('z', np.float32)]))
+        tmpl = template.format("0.7", "x y z", "4 4 4", "F F F", "1 1 1", pc_data.size, "1", "0 0 0 1 0 0 0",
+                               pc_data.size, "binary")
 
-    print(M)
-
-
-
-
-
+    fp = open(path, 'wb')
+    fp.write(tmpl.encode())
+    fp.write(pc_data.tostring())
+    fp.close()

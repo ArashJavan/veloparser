@@ -1,5 +1,4 @@
 import argparse
-import dpkt
 import yaml
 
 from lidar_manager import *
