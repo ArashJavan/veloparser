@@ -180,12 +180,15 @@ class VelodyneVLP16(Lidar):
                 # Determine the azimuth Gap between data blocks
                 azimuth_gap = azimuth[n + 1] - azimuth[n]
             except:
+                if azimuth[n] < azimuth[n-1]:
+                    azimuth[n] += 360
                 azimuth_gap = azimuth[n] - azimuth[n-1]
 
             factor = azimuth_gap / 32.
             k = np.arange(32)
             precise_azimuth = azimuth[n] + factor * k
             precision_azimuth.append(precise_azimuth)
+
         precision_azimuth = np.array(precision_azimuth)
         return precision_azimuth
 

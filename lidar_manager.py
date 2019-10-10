@@ -139,6 +139,7 @@ class VelodyneManager():
 
         # handle rollover (full 360° frame)
         if idx_rollovr is not None:
+
             if idx_rollovr > 0:
                 self.pos_X = np.hstack((self.pos_X, cur_X[0:idx_rollovr+1]))
                 self.pos_Y = np.hstack((self.pos_Y, cur_Y[0:idx_rollovr+1]))
@@ -285,10 +286,10 @@ class VelodyneManager():
 
 
 def write_pcl_txt(path, timestamps, X, Y, Z,  laser_id, intensities=None, latitudes=None, longitudes=None, distances=None):
-    header = "Time [musec], X [m], Y [m], Z [m], ID, Intensity, Latitude [Deg], Longitudes [Deg], Distance [m]"
+    header = "time,X,Y,Z,id,intensity,latitude,longitudes,distance\n"
     try:
         fp = open(path, 'w')
-        np.savetxt(fp, [], delimiter=', ', header=header)
+        fp.write(header)
     except Exception as ex:
         print(str(ex))
         return
@@ -304,7 +305,7 @@ def write_pcl_txt(path, timestamps, X, Y, Z,  laser_id, intensities=None, latitu
     if distances is not None:
         M = np.vstack((M, distances))
 
-    np.savetxt(fp, M.T, fmt=('%d', '%.6f', '%.6f', '%.6f', '%d', '%d', '%.3f', '%.3f', '%.3f'), delimiter=', ')
+    np.savetxt(fp, M.T, fmt=('%d', '%.6f', '%.6f', '%.6f', '%d', '%d', '%.3f', '%.3f', '%.3f'), delimiter=',')
     fp.close()
 
 
