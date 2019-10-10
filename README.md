@@ -34,10 +34,10 @@ Time [musec], X [m], Y [m], Z [m], ID, Intensity, Latitude [Deg], Longitudes [De
 2795827806, 0.083565, 14.399564, 0.251350, 1, 6, 0.333, 1.000, 14.402
 ``
 
-All __Point Cloud__ PCD-Files have follwoing field:
+All __Point Cloud__ PCD-Files have follwoing fields:
 1) X-Coordinate
 2) Y-Coordinate
 3) Z-Coordinate
 4) Intensity
 
-they can be opened and visualized with any poitn cloud rendering software like (open3d, pcl, ...)
+They can also be opened and visualized with any point-cloud rendering software like (open3d, pcl, ...)
