@@ -21,8 +21,9 @@ python veloparser -p /home/user/my.pcap -o /home/user/output_folder -c params.ya
 ##### Dependencies
 Veloparser has follwoing package dependencies:
 - dpkt
-- numpy as np
+- numpy
 - tqdm
+
 Please make sure that all of those packages are installed (pip or conda).
 
 ##### Output
