@@ -31,7 +31,7 @@ class VelodyneManager():
         self.frame_nr = 0
         self.cur_azimuth = None
         self.last_azimuth = None
-        self.date = None
+        self.datetime = None
 
         self.gps_fp = None
 
@@ -85,8 +85,7 @@ class VelodyneManager():
             if 0 < self.params['to'] < idx:
                 break
 
-            if self.date is None:
-                self.datetime = datetime.datetime.utcfromtimestamp(ts)
+            self.datetime = datetime.datetime.utcfromtimestamp(ts)
 
             eth = dpkt.ethernet.Ethernet(buf)
             data = eth.data.data.data
@@ -106,6 +105,7 @@ class VelodyneManager():
             self.gps_fp.close()
 
     def process_data_frame(self, data, timestamp, index):
+
         cur_X, cur_Y, cur_Z, cur_intensities, cur_latitudes, cur_timestamps, cur_distances = self.lidar.process_data_frame(data, index)
 
         # number of sequences
@@ -249,11 +249,14 @@ class VelodyneManager():
         :param timestamp:
         :return:
         """
-        micro = timestamp % (1000*1000)
-        min_float = timestamp / (1000*1000*60)
-        min = int(min_float)
-        sec = int((min_float % min) * 60)
-        min = int(min)
+        try:
+            micro = timestamp % (1000*1000)
+            min_float = (timestamp / (1000*1000*60)) % 60
+            min = int(min_float)
+            sec = int((timestamp / (1000*1000)) % 60)
+            min = int(min)
+        except Exception as ex:
+            print(ex)
         return min, sec, micro
 
     def create_folders(self):

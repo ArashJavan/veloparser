@@ -8,24 +8,6 @@ import numpy as np
 from gps import GprmcMessage, utc_to_weekseconds
 
 
-def read_uint8(data, idx):
-  return data[idx]
-
-
-def read_sint8(data, idx):
-  val = read_uint8(data, idx)
-  return val-256 if val > 127 else val
-
-
-def read_uint16(data, idx):
-  return data[idx] + data[idx+1]*256
-
-
-def read_sint16(data, idx):
-  val = read_uint16(data, idx)
-  return val-2**16 if val > 2**15-1 else val
-
-
 def read_uint32(data, idx):
   return data[idx] + data[idx+1]*256 + data[idx+2]*256*256 + data[idx+3]*256*256*256
 
