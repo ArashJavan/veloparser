@@ -11,7 +11,7 @@ Veloparser is a simple application which does following:
 - Converts frame's timestamps to GPS Week of Second format for synchronization with IMU/GNSS devices
 - Can be parameterizes by yaml file.
 
-The reason why i wrote it, is simply that i could not find any simply way without installuing ROS (Robot operating software)
+The reason why i wrote it, is simply that i could not find any simple way without installing ROS (Robot operating software)
 or other huge c++-based lib that does 'just' extract the point clouds and GPS-Timestamps from pcap-file.
 
 ##### Usage
